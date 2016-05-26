@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
 
   spec.summary       = "Basic API client for Allpay credit card Web Service."
   spec.description   = ""
-  spec.homepage      = ""
+  spec.homepage      = "https://github.com/CalvertYang/allpay-web-service"
   spec.license       = "MIT"
 
   spec.files         = `git ls-files -z`.split("\x0").reject { |f| f.match(%r{^(test|spec|features)/}) }
@@ -19,6 +19,12 @@ Gem::Specification.new do |spec|
   spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
-  spec.add_development_dependency "bundler", "~> 1.11"
-  spec.add_development_dependency "rake", "~> 10.0"
+  spec.add_dependency "nori", "~> 2.6"
+
+  spec.add_development_dependency "bundler", "~> 1.12"
+  spec.add_development_dependency "rake", "~> 11.1"
+  spec.add_development_dependency "rspec", "~> 3.4"
+  spec.add_development_dependency "nokogiri", "~> 1.6.7.2"
+
+  spec.required_ruby_version = ">= 2.1.5"
 end
