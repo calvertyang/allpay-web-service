@@ -22,9 +22,9 @@ Gem::Specification.new do |spec|
   spec.add_dependency "nori", "~> 2.6"
 
   spec.add_development_dependency "bundler", "~> 1.12"
-  spec.add_development_dependency "rake", "~> 11.1"
-  spec.add_development_dependency "rspec", "~> 3.4"
-  spec.add_development_dependency "nokogiri", "~> 1.6.7.2"
+  spec.add_development_dependency "rake", "~> 11.2"
+  spec.add_development_dependency "rspec", "~> 3.5"
+  spec.add_development_dependency "nokogiri", "~> 1.6.8"
 
   spec.required_ruby_version = ">= 2.1.5"
 end

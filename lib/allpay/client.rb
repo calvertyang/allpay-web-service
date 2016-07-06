@@ -3,27 +3,23 @@ require "uri"
 require "net/http"
 require "net/https"
 require "nori"
+require "cgi"
+require "allpay/core_ext/hash"
 
 module AllpayWebService
-  class Response
-    attr_accessor :hash, :xml, :errors
-  end
-
   class ErrorMessage
-    def self.generate params
-      case params[:msg]
+    def self.generate args
+      case args[:msg]
       when :missing_parameter
-        "Missing required parameter: #{params[:field]}"
-      when :wrong_parameter_type
-        "Parameter should be #{params[:type]}"
-      when :wrong_data
-        "#{params[:field]} should be #{params[:data]}"
-      when :wrong_length
-        "The maximum length for #{params[:field]} is #{params[:length]}"
-      when :wrong_format
-        "The format for #{params[:field]} is wrong"
+        "Missing required parameter: #{args[:field]}"
+      when :parameter_should_be
+        "#{args[:field]} should be #{args[:data]}"
+      when :reach_max_length
+        "The maximum length for #{args[:field]} is #{args[:length]}"
+      when :wrong_data_format
+        "The format for #{args[:field]} is wrong"
       when :cannot_be_empty
-        "#{params[:field]} cannot be empty"
+        "#{args[:field]} cannot be empty"
       end
     end
   end
@@ -33,16 +29,16 @@ module AllpayWebService
 
     def initialize merchant_id:, hash_key:, hash_iv:
       raise_argument_error(msg: :missing_parameter, field: :merchant_id) if merchant_id.nil?
-      raise_argument_error(msg: :wrong_data, field: :merchant_id, data: "String") unless merchant_id.is_a? String
+      raise_argument_error(msg: :parameter_should_be, field: :merchant_id, data: "String") unless merchant_id.is_a? String
       raise_argument_error(msg: :cannot_be_empty, field: :merchant_id) if merchant_id.empty?
-      raise_argument_error(msg: :wrong_length, field: :merchant_id, length: 10) if merchant_id.size > 10
+      raise_argument_error(msg: :reach_max_length, field: :merchant_id, length: 10) if merchant_id.size > 10
 
       raise_argument_error(msg: :missing_parameter, field: :hash_key) if hash_key.nil?
-      raise_argument_error(msg: :wrong_data, field: :hash_key, data: "String") unless hash_key.is_a? String
+      raise_argument_error(msg: :parameter_should_be, field: :hash_key, data: "String") unless hash_key.is_a? String
       raise_argument_error(msg: :cannot_be_empty, field: :hash_key) if hash_key.empty?
 
       raise_argument_error(msg: :missing_parameter, field: :hash_iv) if hash_iv.nil?
-      raise_argument_error(msg: :wrong_data, field: :hash_iv, data: "String") unless hash_iv.is_a? String
+      raise_argument_error(msg: :parameter_should_be, field: :hash_iv, data: "String") unless hash_iv.is_a? String
       raise_argument_error(msg: :cannot_be_empty, field: :hash_iv) if hash_iv.empty?
 
       @merchant_id = merchant_id
@@ -51,109 +47,127 @@ module AllpayWebService
     end
 
     # Create trade
-    #
-    # @param params [Hash] The params to create trade.
-    # @return [Response] response data
-    def create_trade params = {}
-      raise_argument_error(msg: :wrong_parameter_type, type: "Hash") unless params.is_a? Hash
+    def create_trade args = {}
+      raise_argument_error(msg: :parameter_should_be, field: "Parameter", data: "Hash") unless args.is_a? Hash
 
-      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if params[:ServiceURL].nil?
-      raise_argument_error(msg: :wrong_data, field: :ServiceURL, data: "String") unless params[:ServiceURL].is_a? String
+      # filter arguments by accept keys
+      accept_keys = [
+        :ServiceURL, :MerchantTradeNo, :MerchantTradeDate, :TotalAmount, :TradeDesc, :CardNo,
+        :CardValidMM, :CardValidYY, :CardCVV2, :UnionPay, :Installment, :ThreeD, :CharSet,
+        :Enn, :BankOnly, :Redeem, :PhoneNumber, :AddMember, :CName, :Email, :Remark, :PlatformID
+      ]
+      args = args.filter(accept_keys)
 
-      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if params[:MerchantTradeNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :MerchantTradeNo, data: "String") unless params[:MerchantTradeNo].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :MerchantTradeNo, length: 20) if params[:MerchantTradeNo].size > 20
+      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if args[:ServiceURL].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :ServiceURL, data: "String") unless args[:ServiceURL].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :ServiceURL) if args[:ServiceURL].empty?
 
-      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeDate) if params[:MerchantTradeDate].nil?
-      raise_argument_error(msg: :wrong_data, field: :MerchantTradeDate, data: "String") unless params[:MerchantTradeDate].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :MerchantTradeDate, length: 20) if params[:MerchantTradeDate].size > 20
-      raise_argument_error(msg: :wrong_format, field: :MerchantTradeDate) unless /\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/.match(params[:MerchantTradeDate])
+      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if args[:MerchantTradeNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :MerchantTradeNo, data: "String") unless args[:MerchantTradeNo].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :MerchantTradeNo) if args[:MerchantTradeNo].empty?
+      raise_argument_error(msg: :reach_max_length, field: :MerchantTradeNo, length: 20) if args[:MerchantTradeNo].size > 20
 
-      raise_argument_error(msg: :missing_parameter, field: :TotalAmount) if params[:TotalAmount].nil?
-      raise_argument_error(msg: :wrong_data, field: :TotalAmount, data: "Integer") unless params[:TotalAmount].is_a? Fixnum
+      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeDate) if args[:MerchantTradeDate].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :MerchantTradeDate, data: "String") unless args[:MerchantTradeDate].is_a? String
+      raise_argument_error(msg: :wrong_data_format, field: :MerchantTradeDate) unless /\A\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}\z/.match(args[:MerchantTradeDate])
 
-      raise_argument_error(msg: :missing_parameter, field: :TradeDesc) if params[:TradeDesc].nil?
-      raise_argument_error(msg: :wrong_data, field: :TradeDesc, data: "String") unless params[:TradeDesc].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :TradeDesc, length: 200) if params[:TradeDesc].size > 200
+      raise_argument_error(msg: :missing_parameter, field: :TotalAmount) if args[:TotalAmount].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :TotalAmount, data: "Integer") unless args[:TotalAmount].is_a? Integer
+      raise_argument_error(msg: :parameter_should_be, field: :TotalAmount, data: "greater than 0") if args[:TotalAmount] <= 0
 
-      raise_argument_error(msg: :missing_parameter, field: :CardNo) if params[:CardNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :CardNo, data: "Integer") unless params[:CardNo].is_a? Fixnum
+      raise_argument_error(msg: :missing_parameter, field: :TradeDesc) if args[:TradeDesc].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :TradeDesc, data: "String") unless args[:TradeDesc].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :TradeDesc) if args[:TradeDesc].empty?
+      raise_argument_error(msg: :reach_max_length, field: :TradeDesc, length: 200) if args[:TradeDesc].size > 200
 
-      raise_argument_error(msg: :missing_parameter, field: :CardValidMM) if params[:CardValidMM].nil?
-      raise_argument_error(msg: :wrong_data, field: :CardValidMM, data: "String") unless params[:CardValidMM].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :CardValidMM, length: 2) if params[:CardValidMM].size > 2
+      raise_argument_error(msg: :missing_parameter, field: :CardNo) if args[:CardNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :CardNo, data: "Integer") unless args[:CardNo].is_a? Integer
 
-      raise_argument_error(msg: :missing_parameter, field: :CardValidYY) if params[:CardValidYY].nil?
-      raise_argument_error(msg: :wrong_data, field: :CardValidYY, data: "String") unless params[:CardValidYY].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :CardValidYY, length: 2) if params[:CardValidYY].size > 2
+      raise_argument_error(msg: :missing_parameter, field: :CardValidMM) if args[:CardValidMM].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :CardValidMM, data: "String") unless args[:CardValidMM].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :CardValidMM) if args[:CardValidMM].empty?
+      raise_argument_error(msg: :reach_max_length, field: :CardValidMM, length: 2) if args[:CardValidMM].size > 2
 
-      if params.has_key? :CardCVV2
-        raise_argument_error(msg: :wrong_data, field: :CardCVV2, data: "Integer") unless params[:CardCVV2].is_a? Fixnum
+      raise_argument_error(msg: :missing_parameter, field: :CardValidYY) if args[:CardValidYY].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :CardValidYY, data: "String") unless args[:CardValidYY].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :CardValidYY) if args[:CardValidYY].empty?
+      raise_argument_error(msg: :reach_max_length, field: :CardValidYY, length: 2) if args[:CardValidYY].size > 2
+
+      if args.has_key? :CardCVV2
+        raise_argument_error(msg: :parameter_should_be, field: :CardCVV2, data: "Integer") unless args[:CardCVV2].is_a? Integer
       end
 
-      if params.has_key? :UnionPay
-        raise_argument_error(msg: :wrong_data, field: :UnionPay, data: "Integer") unless params[:UnionPay].is_a? Fixnum
+      # NOTE: Web Service 版本都帶 0。
+      args.delete :UnionPay if args.has_key? :UnionPay
+      # if args.has_key? :UnionPay
+      #   raise_argument_error(msg: :parameter_should_be, field: :UnionPay, data: "Integer") unless args[:UnionPay].is_a? Integer
+      # end
+
+      if args.has_key? :Installment
+        raise_argument_error(msg: :parameter_should_be, field: :Installment, data: "Integer") unless args[:Installment].is_a? Integer
       end
 
-      if params.has_key? :Installment
-        raise_argument_error(msg: :wrong_data, field: :Installment, data: "Integer") unless params[:Installment].is_a? Fixnum
+      if args.has_key? :ThreeD
+        raise_argument_error(msg: :parameter_should_be, field: :ThreeD, data: "Integer") unless args[:ThreeD].is_a? Integer
+        raise_argument_error(msg: :parameter_should_be, field: :ThreeD, data: ThreeD.readable_keys) unless ThreeD.values.include? args[:ThreeD]
       end
 
-      if params.has_key? :ThreeD
-        raise_argument_error(msg: :wrong_data, field: :ThreeD, data: "Integer") unless params[:ThreeD].is_a? Fixnum
+      if args.has_key? :CharSet
+        raise_argument_error(msg: :parameter_should_be, field: :CharSet, data: "String") unless args[:CharSet].is_a? String
+        raise_argument_error(msg: :parameter_should_be, field: :CharSet, data: CharSet.readable_keys) unless CharSet.values.include? args[:CharSet]
       end
 
-      if params.has_key? :CharSet
-        raise_argument_error(msg: :wrong_data, field: :CharSet, data: "String") unless params[:CharSet].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :CharSet, length: 10) if params[:CharSet].size > 10
+      if args.has_key? :Enn
+        raise_argument_error(msg: :parameter_should_be, field: :Enn, data: "String") unless args[:Enn].is_a? String
+        raise_argument_error(msg: :parameter_should_be, field: :Enn, data: English.readable_keys) unless English.values.include? args[:Enn]
       end
 
-      if params.has_key? :Enn
-        raise_argument_error(msg: :wrong_data, field: :Enn, data: "String") unless params[:Enn].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :Enn, length: 1) if params[:Enn].size > 1
+      if args.has_key? :BankOnly
+        raise_argument_error(msg: :parameter_should_be, field: :BankOnly, data: "String") unless args[:BankOnly].is_a? String
+        raise_argument_error(msg: :reach_max_length, field: :BankOnly, length: 120) if args[:BankOnly].size > 120
       end
 
-      if params.has_key? :BankOnly
-        raise_argument_error(msg: :wrong_data, field: :BankOnly, data: "String") unless params[:BankOnly].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :BankOnly, length: 120) if params[:BankOnly].size > 120
+      # NOTE: 目前 Web Service 是背景處理授權，尚未開放紅利折抵。
+      args.delete :Redeem if args.has_key? :Redeem
+      # if args.has_key? :Redeem
+      #   raise_argument_error(msg: :parameter_should_be, field: :Redeem, data: "String") unless args[:Redeem].is_a? String
+      #   raise_argument_error(msg: :reach_max_length, field: :Redeem, length: 1) if args[:Redeem].size > 1
+      # end
+
+      if args.has_key? :PhoneNumber
+        raise_argument_error(msg: :parameter_should_be, field: :PhoneNumber, data: "String") unless args[:PhoneNumber].is_a? String
+        raise_argument_error(msg: :reach_max_length, field: :PhoneNumber, length: 10) if args[:PhoneNumber].size > 10
       end
 
-      if params.has_key? :Redeem
-        raise_argument_error(msg: :wrong_data, field: :Redeem, data: "String") unless params[:Redeem].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :Redeem, length: 1) if params[:Redeem].size > 1
+      if args.has_key? :AddMember
+        raise_argument_error(msg: :parameter_should_be, field: :AddMember, data: "String") unless args[:AddMember].is_a? String
+        raise_argument_error(msg: :parameter_should_be, field: :AddMember, data: AddMember.readable_keys) unless AddMember.values.include? args[:AddMember]
       end
 
-      if params.has_key? :PhoneNumber
-        raise_argument_error(msg: :wrong_data, field: :PhoneNumber, data: "String") unless params[:PhoneNumber].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :PhoneNumber, length: 10) if params[:PhoneNumber].size > 10
+      if args[:AddMember] == AddMember::YES
+        raise_argument_error(msg: :missing_parameter, field: :CName) if args[:CName].nil?
+        raise_argument_error(msg: :parameter_should_be, field: :CName, data: "String") unless args[:CName].is_a? String
+        raise_argument_error(msg: :cannot_be_empty, field: :CName) if args[:CName].empty?
+        raise_argument_error(msg: :reach_max_length, field: :CName, length: 60) if args[:CName].size > 60
       end
 
-      if params.has_key? :AddMember
-        raise_argument_error(msg: :wrong_data, field: :AddMember, data: "String") unless params[:AddMember].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :AddMember, length: 1) if params[:AddMember].size > 1
+      if args.has_key? :Email
+        raise_argument_error(msg: :parameter_should_be, field: :Email, data: "String") unless args[:Email].is_a? String
+        raise_argument_error(msg: :reach_max_length, field: :Email, length: 100) if args[:Email].size > 100
       end
 
-      if params[:AddMember] == 1
-        raise_argument_error(msg: :missing_parameter, field: :CName) if params[:CName].nil?
-        raise_argument_error(msg: :wrong_data, field: :CName, data: "String") unless params[:CName].is_a? String
-        raise_argument_error(msg: :cannot_be_empty, field: :CName) if params[:CName].empty?
-        raise_argument_error(msg: :wrong_length, field: :CName, length: 60) if params[:CName].size > 60
+      if args.has_key? :Remark
+        raise_argument_error(msg: :parameter_should_be, field: :Remark, data: "String") unless args[:Remark].is_a? String
+        raise_argument_error(msg: :reach_max_length, field: :Remark, length: 200) if args[:Remark].size > 200
       end
 
-      if params.has_key? :Email
-        raise_argument_error(msg: :wrong_data, field: :Email, data: "String") unless params[:Email].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :Email, length: 100) if params[:Email].size > 100
+      if args.has_key? :PlatformID
+        raise_argument_error(msg: :parameter_should_be, field: :PlatformID, data: "String") unless args[:PlatformID].is_a? String
+        raise_argument_error(msg: :reach_max_length, field: :PlatformID, length: 9) if args[:PlatformID].size > 9
       end
 
-      if params.has_key? :Remark
-        raise_argument_error(msg: :wrong_data, field: :Remark, data: "String") unless params[:Remark].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :Remark, length: 200) if params[:Remark].size > 200
-      end
-
-      if params.has_key? :PlatformID
-        raise_argument_error(msg: :wrong_data, field: :PlatformID, data: "String") unless params[:PlatformID].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :PlatformID, length: 9) if params[:PlatformID].size > 9
-      end
+      service_url = args[:ServiceURL]
+      args.delete :ServiceURL
 
       data = {
         MerchantID: @merchant_id,
@@ -172,168 +186,205 @@ module AllpayWebService
         Email: "",
         Remark: "",
         PlatformID: ""
-      }.merge(params)
+      }.merge(args)
       data[:TradeDesc] = CGI.escape(data[:TradeDesc])[0...200]
       data[:CardValidMM] = data[:CardValidMM].to_s.rjust(2, "0")
       data[:Remark] = CGI.escape(data[:Remark])[0...200]
 
-      post_data = build_post_data trade_type: :create_trade, params: data
+      post_data = build_post_data trade_type: :create_trade, args: data
 
-      response = request(service_url: params[:ServiceURL], data: post_data, is_soap_request: true)
+      response = request(service_url: service_url, data: post_data, is_soap_request: true)
 
       parse trade_type: :create_trade, response: response
     end
 
     # Verify order by otp code
-    #
-    # @param params [Hash] The params to verify order by otp code.
-    # @return [Response] response data
-    def verify_order_by_otp params = {}
-      raise_argument_error(msg: :wrong_parameter_type, type: "Hash") unless params.is_a? Hash
+    def verify_order_by_otp args = {}
+      raise_argument_error(msg: :parameter_should_be, field: "Parameter", data: "Hash") unless args.is_a? Hash
 
-      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if params[:ServiceURL].nil?
-      raise_argument_error(msg: :wrong_data, field: :ServiceURL, data: "String") unless params[:ServiceURL].is_a? String
+      # filter argumentss by accept keys
+      accept_keys = [
+        :ServiceURL, :MerchantTradeNo, :TradeNo, :OtpCode, :PlatformID
+      ]
+      args = args.filter(accept_keys)
 
-      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if params[:MerchantTradeNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :MerchantTradeNo, data: "String") unless params[:MerchantTradeNo].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :MerchantTradeNo, length: 20) if params[:MerchantTradeNo].size > 20
+      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if args[:ServiceURL].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :ServiceURL, data: "String") unless args[:ServiceURL].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :ServiceURL) if args[:ServiceURL].empty?
 
-      raise_argument_error(msg: :missing_parameter, field: :TradeNo) if params[:TradeNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :TradeNo, data: "String") unless params[:TradeNo].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :TradeNo, length: 20) if params[:TradeNo].size > 20
+      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if args[:MerchantTradeNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :MerchantTradeNo, data: "String") unless args[:MerchantTradeNo].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :MerchantTradeNo) if args[:MerchantTradeNo].empty?
+      raise_argument_error(msg: :reach_max_length, field: :MerchantTradeNo, length: 20) if args[:MerchantTradeNo].size > 20
 
-      raise_argument_error(msg: :missing_parameter, field: :OtpCode) if params[:OtpCode].nil?
-      raise_argument_error(msg: :wrong_data, field: :OtpCode, data: "String") unless params[:OtpCode].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :OtpCode, length: 10) if params[:OtpCode].size > 10
+      raise_argument_error(msg: :missing_parameter, field: :TradeNo) if args[:TradeNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :TradeNo, data: "String") unless args[:TradeNo].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :TradeNo) if args[:TradeNo].empty?
+      raise_argument_error(msg: :reach_max_length, field: :TradeNo, length: 20) if args[:TradeNo].size > 20
 
-      if params.has_key? :PlatformID
-        raise_argument_error(msg: :wrong_data, field: :PlatformID, data: "String") unless params[:PlatformID].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :PlatformID, length: 9) if params[:PlatformID].size > 9
+      raise_argument_error(msg: :missing_parameter, field: :OtpCode) if args[:OtpCode].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :OtpCode, data: "String") unless args[:OtpCode].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :OtpCode) if args[:OtpCode].empty?
+      raise_argument_error(msg: :reach_max_length, field: :OtpCode, length: 10) if args[:OtpCode].size > 10
+
+      if args.has_key? :PlatformID
+        raise_argument_error(msg: :parameter_should_be, field: :PlatformID, data: "String") unless args[:PlatformID].is_a? String
+        raise_argument_error(msg: :reach_max_length, field: :PlatformID, length: 9) if args[:PlatformID].size > 9
       end
+
+      service_url = args[:ServiceURL]
+      args.delete :ServiceURL
 
       data = {
         MerchantID: @merchant_id,
         PlatformID: ""
-      }.merge(params)
+      }.merge(args)
 
-      post_data = build_post_data trade_type: :verify_order_by_otp, params: data
+      post_data = build_post_data trade_type: :verify_order_by_otp, args: data
 
-      response = request(service_url: params[:ServiceURL], data: post_data, is_soap_request: true)
+      response = request(service_url: service_url, data: post_data, is_soap_request: true)
 
       parse trade_type: :verify_order_by_otp, response: response
     end
 
     # Resend otp code
-    #
-    # @param params [Hash] The params to resend otp code.
-    # @return [Response] response data
-    def resend_otp params = {}
-      raise_argument_error(msg: :wrong_parameter_type, type: "Hash") unless params.is_a? Hash
+    def resend_otp args = {}
+      raise_argument_error(msg: :parameter_should_be, field: "Parameter", data: "Hash") unless args.is_a? Hash
 
-      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if params[:ServiceURL].nil?
-      raise_argument_error(msg: :wrong_data, field: :ServiceURL, data: "String") unless params[:ServiceURL].is_a? String
+      # filter arguments by accept keys
+      accept_keys = [
+        :ServiceURL, :MerchantTradeNo, :TradeNo, :PlatformID
+      ]
+      args = args.filter(accept_keys)
 
-      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if params[:MerchantTradeNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :MerchantTradeNo, data: "String") unless params[:MerchantTradeNo].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :MerchantTradeNo, length: 20) if params[:MerchantTradeNo].size > 20
+      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if args[:ServiceURL].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :ServiceURL, data: "String") unless args[:ServiceURL].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :ServiceURL) if args[:ServiceURL].empty?
 
-      raise_argument_error(msg: :missing_parameter, field: :TradeNo) if params[:TradeNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :TradeNo, data: "String") unless params[:TradeNo].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :TradeNo, length: 20) if params[:TradeNo].size > 20
+      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if args[:MerchantTradeNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :MerchantTradeNo, data: "String") unless args[:MerchantTradeNo].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :MerchantTradeNo) if args[:MerchantTradeNo].empty?
+      raise_argument_error(msg: :reach_max_length, field: :MerchantTradeNo, length: 20) if args[:MerchantTradeNo].size > 20
 
-      if params.has_key? :PlatformID
-        raise_argument_error(msg: :wrong_data, field: :PlatformID, data: "String") unless params[:PlatformID].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :PlatformID, length: 9) if params[:PlatformID].size > 9
+      raise_argument_error(msg: :missing_parameter, field: :TradeNo) if args[:TradeNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :TradeNo, data: "String") unless args[:TradeNo].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :TradeNo) if args[:TradeNo].empty?
+      raise_argument_error(msg: :reach_max_length, field: :TradeNo, length: 20) if args[:TradeNo].size > 20
+
+      if args.has_key? :PlatformID
+        raise_argument_error(msg: :parameter_should_be, field: :PlatformID, data: "String") unless args[:PlatformID].is_a? String
+        raise_argument_error(msg: :reach_max_length, field: :PlatformID, length: 9) if args[:PlatformID].size > 9
       end
+
+      service_url = args[:ServiceURL]
+      args.delete :ServiceURL
 
       data = {
         MerchantID: @merchant_id,
         PlatformID: ""
-      }.merge(params)
+      }.merge(args)
 
-      post_data = build_post_data trade_type: :resend_otp, params: data
+      post_data = build_post_data trade_type: :resend_otp, args: data
 
-      response = request(service_url: params[:ServiceURL], data: post_data, is_soap_request: true)
+      response = request(service_url: service_url, data: post_data, is_soap_request: true)
 
       parse trade_type: :resend_otp, response: response
     end
 
     # Query trade information
-    #
-    # @param params [Hash] The params to query trade information.
-    # @return [Response] response data
-    def query_trade params = {}
-      raise_argument_error(msg: :wrong_parameter_type, type: "Hash") unless params.is_a? Hash
+    def query_trade args = {}
+      raise_argument_error(msg: :parameter_should_be, field: "Parameter", data: "Hash") unless args.is_a? Hash
 
-      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if params[:ServiceURL].nil?
-      raise_argument_error(msg: :wrong_data, field: :ServiceURL, data: "String") unless params[:ServiceURL].is_a? String
+      # filter arguments by accept keys
+      accept_keys = [
+        :ServiceURL, :MerchantTradeNo, :PlatformID
+      ]
+      args = args.filter(accept_keys)
 
-      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if params[:MerchantTradeNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :MerchantTradeNo, data: "String") unless params[:MerchantTradeNo].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :MerchantTradeNo, length: 20) if params[:MerchantTradeNo].size > 20
+      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if args[:ServiceURL].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :ServiceURL, data: "String") unless args[:ServiceURL].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :ServiceURL) if args[:ServiceURL].empty?
 
-      if params.has_key? :PlatformID
-        raise_argument_error(msg: :wrong_data, field: :PlatformID, data: "String") unless params[:PlatformID].is_a? String
-        raise_argument_error(msg: :cannot_be_empty, field: :PlatformID) if params[:PlatformID].nil? or params[:PlatformID].empty?
-        raise_argument_error(msg: :wrong_length, field: :PlatformID, length: 9) if params[:PlatformID].size > 9
+      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if args[:MerchantTradeNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :MerchantTradeNo, data: "String") unless args[:MerchantTradeNo].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :MerchantTradeNo) if args[:MerchantTradeNo].empty?
+      raise_argument_error(msg: :reach_max_length, field: :MerchantTradeNo, length: 20) if args[:MerchantTradeNo].size > 20
+
+      if args.has_key? :PlatformID
+        raise_argument_error(msg: :parameter_should_be, field: :PlatformID, data: "String") unless args[:PlatformID].is_a? String
+        raise_argument_error(msg: :cannot_be_empty, field: :PlatformID) if args[:PlatformID].nil? or args[:PlatformID].empty?
+        raise_argument_error(msg: :reach_max_length, field: :PlatformID, length: 9) if args[:PlatformID].size > 9
       end
 
-      trade_type = params[:PlatformID].nil? ? :query_trade : :platform_query_trade
+      trade_type = args[:PlatformID].nil? ? :query_trade : :platform_query_trade
+
+      service_url = args[:ServiceURL]
+      args.delete :ServiceURL
 
       data = {
         PlatformID: ""
-      }.merge(params)
+      }.merge(args)
 
-      post_data = build_post_data trade_type: trade_type, params: data
+      post_data = build_post_data trade_type: trade_type, args: data
 
-      response = request(service_url: params[:ServiceURL], data: post_data, is_soap_request: true)
+      response = request(service_url: service_url, data: post_data, is_soap_request: true)
 
       parse trade_type: :query_trade, response: response
     end
 
     # Execute action for trade
-    #
-    # @param params [Hash] The params to execute action for trade. See the official manual for more information.
-    # @return [Response] response data
-    def do_action params = {}
-      raise_argument_error(msg: :wrong_parameter_type, type: "Hash") unless params.is_a? Hash
+    def do_action args = {}
+      raise_argument_error(msg: :parameter_should_be, field: "Parameter", data: "Hash") unless args.is_a? Hash
 
-      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if params[:ServiceURL].nil?
-      raise_argument_error(msg: :wrong_data, field: :ServiceURL, data: "String") unless params[:ServiceURL].is_a? String
+      # filter arguments by accept keys
+      accept_keys = [
+        :ServiceURL, :MerchantTradeNo, :TradeNo, :Action, :TotalAmount, :PlatformID
+      ]
+      args = args.filter(accept_keys)
 
-      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if params[:MerchantTradeNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :MerchantTradeNo, data: "String") unless params[:MerchantTradeNo].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :MerchantTradeNo, length: 20) if params[:MerchantTradeNo].size > 20
+      raise_argument_error(msg: :missing_parameter, field: :ServiceURL) if args[:ServiceURL].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :ServiceURL, data: "String") unless args[:ServiceURL].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :ServiceURL) if args[:ServiceURL].empty?
 
-      raise_argument_error(msg: :missing_parameter, field: :TradeNo) if params[:TradeNo].nil?
-      raise_argument_error(msg: :wrong_data, field: :TradeNo, data: "String") unless params[:TradeNo].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :TradeNo, length: 20) if params[:TradeNo].size > 20
+      raise_argument_error(msg: :missing_parameter, field: :MerchantTradeNo) if args[:MerchantTradeNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :MerchantTradeNo, data: "String") unless args[:MerchantTradeNo].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :MerchantTradeNo) if args[:MerchantTradeNo].empty?
+      raise_argument_error(msg: :reach_max_length, field: :MerchantTradeNo, length: 20) if args[:MerchantTradeNo].size > 20
 
-      raise_argument_error(msg: :missing_parameter, field: :Action) if params[:Action].nil?
-      raise_argument_error(msg: :wrong_data, field: :Action, data: "String") unless params[:Action].is_a? String
-      raise_argument_error(msg: :wrong_length, field: :Action, length: 1) if params[:Action].size > 1
+      raise_argument_error(msg: :missing_parameter, field: :TradeNo) if args[:TradeNo].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :TradeNo, data: "String") unless args[:TradeNo].is_a? String
+      raise_argument_error(msg: :cannot_be_empty, field: :TradeNo) if args[:TradeNo].empty?
+      raise_argument_error(msg: :reach_max_length, field: :TradeNo, length: 20) if args[:TradeNo].size > 20
 
-      raise_argument_error(msg: :missing_parameter, field: :TotalAmount) if params[:TotalAmount].nil?
-      raise_argument_error(msg: :wrong_data, field: :TotalAmount, data: "Integer") unless params[:TotalAmount].is_a? Fixnum
+      raise_argument_error(msg: :missing_parameter, field: :Action) if args[:Action].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :Action, data: "String") unless args[:Action].is_a? String
+      raise_argument_error(msg: :parameter_should_be, field: :Action, data: ActionType.readable_keys) unless ActionType.values.include? args[:Action]
 
-      if params.has_key? :PlatformID
-        raise_argument_error(msg: :wrong_data, field: :PlatformID, data: "String") unless params[:PlatformID].is_a? String
-        raise_argument_error(msg: :wrong_length, field: :PlatformID, length: 9) if params[:PlatformID].size > 9
+      raise_argument_error(msg: :missing_parameter, field: :TotalAmount) if args[:TotalAmount].nil?
+      raise_argument_error(msg: :parameter_should_be, field: :TotalAmount, data: "Integer") unless args[:TotalAmount].is_a? Integer
+      raise_argument_error(msg: :parameter_should_be, field: :TotalAmount, data: "greater than 0") if args[:TotalAmount] <= 0
+
+      if args.has_key? :PlatformID
+        raise_argument_error(msg: :parameter_should_be, field: :PlatformID, data: "String") unless args[:PlatformID].is_a? String
+        raise_argument_error(msg: :reach_max_length, field: :PlatformID, length: 9) if args[:PlatformID].size > 9
       end
 
-      data = {}.merge(params)
+      service_url = args[:ServiceURL]
+      args.delete :ServiceURL
 
-      post_data = build_post_data trade_type: :do_action, params: data
+      data = {}.merge(args)
 
-      response = request service_url: params[:ServiceURL], data: post_data, platform_id: params[:PlatformID]
+      post_data = build_post_data trade_type: :do_action, args: data
+
+      response = request service_url: service_url, data: post_data, platform_id: args[:PlatformID]
 
       parse trade_type: :do_action, response: response
     end
 
     private
 
-      def raise_argument_error params
-        raise ArgumentError, ErrorMessage.generate(params)
+      def raise_argument_error args
+        raise ArgumentError, ErrorMessage.generate(args)
       end
 
       # Encode(by base64) and encrypt(by AES-128-CBC) data
@@ -358,29 +409,29 @@ module AllpayWebService
         CGI.unescape plain_data
       end
 
-      def build_post_data trade_type:, params:
+      def build_post_data trade_type:, args:
         case trade_type
         when :create_trade
-          xml_data= "<?xml version=\"1.0\" encoding=\"utf-8\" ?><Root><Data><MerchantID>#{@merchant_id}</MerchantID><MerchantTradeNo>#{params[:MerchantTradeNo]}</MerchantTradeNo><MerchantTradeDate>#{params[:MerchantTradeDate]}</MerchantTradeDate><TotalAmount>#{params[:TotalAmount]}</TotalAmount><TradeDesc>#{params[:TradeDesc]}</TradeDesc><CardNo>#{params[:CardNo]}</CardNo><CardValidMM>#{params[:CardValidMM]}</CardValidMM><CardValidYY>#{params[:CardValidYY]}</CardValidYY><CardCVV2>#{params[:CardCVV2]}</CardCVV2><UnionPay>#{params[:UnionPay]}</UnionPay><Installment>#{params[:Installment]}</Installment><ThreeD>#{params[:ThreeD]}</ThreeD><CharSet>#{params[:CharSet]}</CharSet><Enn>#{params[:Enn]}</Enn><BankOnly>#{params[:BankOnly]}</BankOnly><Redeem>#{params[:Redeem]}</Redeem><PhoneNumber>#{params[:PhoneNumber]}</PhoneNumber><AddMember>#{params[:AddMember]}</AddMember><CName>#{params[:CName]}</CName><Email>#{params[:Email]}</Email><Remark>#{params[:Remark]}</Remark><PlatformID>#{params[:PlatformID]}</PlatformID></Data></Root>"
+          xml_data= "<?xml version=\"1.0\" encoding=\"utf-8\" ?><Root><Data><MerchantID>#{@merchant_id}</MerchantID><MerchantTradeNo>#{args[:MerchantTradeNo]}</MerchantTradeNo><MerchantTradeDate>#{args[:MerchantTradeDate]}</MerchantTradeDate><TotalAmount>#{args[:TotalAmount]}</TotalAmount><TradeDesc>#{args[:TradeDesc]}</TradeDesc><CardNo>#{args[:CardNo]}</CardNo><CardValidMM>#{args[:CardValidMM]}</CardValidMM><CardValidYY>#{args[:CardValidYY]}</CardValidYY><CardCVV2>#{args[:CardCVV2]}</CardCVV2><UnionPay>#{args[:UnionPay]}</UnionPay><Installment>#{args[:Installment]}</Installment><ThreeD>#{args[:ThreeD]}</ThreeD><CharSet>#{args[:CharSet]}</CharSet><Enn>#{args[:Enn]}</Enn><BankOnly>#{args[:BankOnly]}</BankOnly><Redeem>#{args[:Redeem]}</Redeem><PhoneNumber>#{args[:PhoneNumber]}</PhoneNumber><AddMember>#{args[:AddMember]}</AddMember><CName>#{args[:CName]}</CName><Email>#{args[:Email]}</Email><Remark>#{args[:Remark]}</Remark><PlatformID>#{args[:PlatformID]}</PlatformID></Data></Root>"
           encrypted_data = encrypt(xml_data)
           "<?xml version=\"1.0\" encoding=\"utf-8\"?><soap12:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:soap12=\"http://www.w3.org/2003/05/soap-envelope\"><soap12:Body><CreateTrade xmlns=\"http://PaymentCenter.AllPay.com.tw/\"><merchantID>#{@merchant_id}</merchantID><xmlData>#{encrypted_data}</xmlData></CreateTrade></soap12:Body></soap12:Envelope>"
         when :verify_order_by_otp
-          xml_data = "<?xml version=\"1.0\" encoding=\"utf-8\" ?><Root><Data><MerchantID>#{params[:MerchantID]}</MerchantID><MerchantTradeNo>#{params[:MerchantTradeNo]}</MerchantTradeNo><TradeNo>#{params[:TradeNo]}</TradeNo><OtpCode>#{params[:OtpCode]}</OtpCode><PlatformID>#{params[:PlatformID]}</PlatformID></Data></Root>"
+          xml_data = "<?xml version=\"1.0\" encoding=\"utf-8\" ?><Root><Data><MerchantID>#{args[:MerchantID]}</MerchantID><MerchantTradeNo>#{args[:MerchantTradeNo]}</MerchantTradeNo><TradeNo>#{args[:TradeNo]}</TradeNo><OtpCode>#{args[:OtpCode]}</OtpCode><PlatformID>#{args[:PlatformID]}</PlatformID></Data></Root>"
           encrypted_data = encrypt(xml_data)
           "<?xml version=\"1.0\" encoding=\"utf-8\"?><soap12:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:soap12=\"http://www.w3.org/2003/05/soap-envelope\"><soap12:Body><VerifyOrderByOtp xmlns=\"http://PaymentCenter.AllPay.com.tw/\"><merchantID>#{@merchant_id}</merchantID><xmlData>#{encrypted_data}</xmlData></VerifyOrderByOtp></soap12:Body></soap12:Envelope>"
         when :resend_otp
-          xml_data = "<?xml version=\"1.0\" encoding=\"utf-8\" ?><Root><Data><MerchantID>#{params[:MerchantID]}</MerchantID><MerchantTradeNo>#{params[:MerchantTradeNo]}</MerchantTradeNo><TradeNo>#{params[:TradeNo]}</TradeNo><PlatformID></PlatformID></Data></Root>"
+          xml_data = "<?xml version=\"1.0\" encoding=\"utf-8\" ?><Root><Data><MerchantID>#{args[:MerchantID]}</MerchantID><MerchantTradeNo>#{args[:MerchantTradeNo]}</MerchantTradeNo><TradeNo>#{args[:TradeNo]}</TradeNo><PlatformID></PlatformID></Data></Root>"
           encrypted_data = encrypt(xml_data)
           "<?xml version=\"1.0\" encoding=\"utf-8\"?><soap12:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:soap12=\"http://www.w3.org/2003/05/soap-envelope\"><soap12:Body><ResendOtp xmlns=\"http://PaymentCenter.AllPay.com.tw/\"><merchantID>#{@merchant_id}</merchantID><xmlData>#{encrypted_data}</xmlData></ResendOtp></soap12:Body></soap12:Envelope>"
         when :query_trade
-          merchant_trade_no = encrypt(params[:MerchantTradeNo])
+          merchant_trade_no = encrypt(args[:MerchantTradeNo])
           "<?xml version=\"1.0\" encoding=\"utf-8\"?><soap12:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:soap12=\"http://www.w3.org/2003/05/soap-envelope\"><soap12:Body><QueryTrade xmlns=\"http://PaymentCenter.AllPay.com.tw/\"><merchantID>#{@merchant_id}</merchantID><merchantTradeNo>#{merchant_trade_no}</merchantTradeNo></QueryTrade></soap12:Body></soap12:Envelope>"
         when :platform_query_trade
-          merchant_trade_no = encrypt(params[:MerchantTradeNo])
-          platform_id = encrypt(params[:PlatformID])
+          merchant_trade_no = encrypt(args[:MerchantTradeNo])
+          platform_id = encrypt(args[:PlatformID])
           "<?xml version=\"1.0\" encoding=\"utf-8\"?><soap12:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:soap12=\"http://www.w3.org/2003/05/soap-envelope\"><soap12:Body><PlatformQueryTrade xmlns=\"http://PaymentCenter.AllPay.com.tw/\"><merchantID>#{@merchant_id}</merchantID><merchantTradeNo>#{merchant_trade_no}</merchantTradeNo><PlatformID>#{platform_id}</PlatformID></PlatformQueryTrade></soap12:Body></soap12:Envelope>"
         when :do_action
-          encrypt("<?xml version=\"1.0\" encoding=\"utf-8\" ?><Root><Data><MerchantID>#{@merchant_id}</MerchantID><MerchantTradeNo>#{params[:MerchantTradeNo]}</MerchantTradeNo><TradeNo>#{params[:TradeNo]}</TradeNo><Action>#{params[:Action]}</Action><TotalAmount>#{params[:TotalAmount]}</TotalAmount></Data></Root>")
+          encrypt("<?xml version=\"1.0\" encoding=\"utf-8\" ?><Root><Data><MerchantID>#{@merchant_id}</MerchantID><MerchantTradeNo>#{args[:MerchantTradeNo]}</MerchantTradeNo><TradeNo>#{args[:TradeNo]}</TradeNo><Action>#{args[:Action]}</Action><TotalAmount>#{args[:TotalAmount]}</TotalAmount></Data></Root>")
         end
       end
 
