@@ -466,9 +466,9 @@ module AllpayWebService
         when Net::HTTPOK
           http_response
         when Net::HTTPClientError, Net::HTTPInternalServerError
-          raise Net::HTTPError, http_response.message
+          raise Net::HTTPError.new(http_response.message, http_response)
         else
-          raise Net::HTTPError, "Unexpected HTTP response."
+          raise Net::HTTPError.new('Unexpected HTTP response.', http_response)
         end
       end
 

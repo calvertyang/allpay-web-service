@@ -1,3 +1,6 @@
+1.1.1 Mar 1, 2017
+* Bug fixes
+
 1.1.0 Jul 6, 2016
 * Code refactoring
 
